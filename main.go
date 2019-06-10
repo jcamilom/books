@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,17 @@ type book struct {
 	ISBN   string `json:"isbn"`
 	Title  string `json:"title"`
 	Author string `json:"author"`
+}
+
+func router(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	switch req.HTTPMethod {
+	case "GET":
+		return show(req)
+	case "POST":
+		return create(req)
+	default:
+		return clientError(http.StatusMethodNotAllowed)
+	}
 }
 
 func show(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -52,6 +64,35 @@ func show(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, er
 	}, nil
 }
 
+func create(req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	if req.Headers["Content-Type"] != "application/json" {
+		return clientError(http.StatusNotAcceptable)
+	}
+
+	bk := new(book)
+	err := json.Unmarshal([]byte(req.Body), bk)
+	if err != nil {
+		return clientError(http.StatusUnprocessableEntity)
+	}
+
+	if !isbnRegexp.MatchString(bk.ISBN) {
+		return clientError(http.StatusBadRequest)
+	}
+	if bk.Title == "" || bk.Author == "" {
+		return clientError(http.StatusBadRequest)
+	}
+
+	err = putItem(bk)
+	if err != nil {
+		return serverError(err)
+	}
+
+	return events.APIGatewayProxyResponse{
+		StatusCode: 201,
+		Headers:    map[string]string{"Location": fmt.Sprintf("/books?isbn=%s", bk.ISBN)},
+	}, nil
+}
+
 // Add a helper for handling errors. This logs any error to os.Stderr
 // and returns a 500 Internal Server Error response that the AWS API
 // Gateway understands.
@@ -73,5 +114,5 @@ func clientError(status int) (events.APIGatewayProxyResponse, error) {
 }
 
 func main() {
-	lambda.Start(show)
+	lambda.Start(router)
 }
